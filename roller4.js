@@ -701,13 +701,17 @@ $g.createCarousel = function(rows, imgs, state, data) {
     var carousel = {
         rows                : rows,
         imgs                : imgs,
+        rowSet              : rows,
+        imgSet              : imgs,
         // 每个Row里面的img为一组
         imgsGroup           : imgsGroup,
         data                : data,
-         // 每个row里面的data为一组
+         // 每个row里面的data为一组， 分组是为了循环数据时操作方便
         dataGroups          : dataGroups,
         dataGroupsCursor    : 0,
         lastDataGroupsCursor: 0,
+        onRollInit          : null,
+        onROllUpdate        : null,
         onRollReady         : null,
         onRollStart         : null,
         onRollEnd           : null,
@@ -720,22 +724,34 @@ $g.createCarousel = function(rows, imgs, state, data) {
         // 先刷其他行
         var startCursor = carousel.dataGroupsCursor,
             colIndex = 0,
-            count = 0; // 辅助计数
+            count = 0, // 辅助计数
+            // 用于onRollInit
+            _dataCursor = 0,
+            _rowIndex = 0;
         for (var i = 1, l = rows.length; i < l; i++) {
             for (var c = 0, cl = columns; c < cl; c++) {
                 colIndex = i * columns + c;
                 if (startCursor + i < dataGroups.length) {
                     imgs[colIndex].src = dataGroups[startCursor + i][c].src;
+                    // cb
+                    _dataCursor = (startCursor + i) * columns + c;
+                    _rowIndex = startCursor + i;
                 } else {
                     imgs[colIndex].src = dataGroups[count][c].src;
+                    // cb
+                    _dataCursor = count * columns + c;
+                    _rowIndex = count;
+
                     if (c === columns - 1) count += 1;
                 }
+                if(carousel.onRollInit) carousel.onRollInit(imgs[colIndex], _dataCursor, _rowIndex);
             }
         }
         // 再刷第一行
         for (var i = 0, l = columns; i < l; i++) {
             // 这里利用上一步的count
             imgs[i].src = dataGroups[count][i].src;
+            if(carousel.onRollInit) carousel.onRollInit(imgs[i], count * columns + i, count);
         }
     };
     roller.onRollReady = function(roller) {
@@ -752,9 +768,14 @@ $g.createCarousel = function(rows, imgs, state, data) {
         this._log('onRollEndUpdateData');
         // 先找数据
         var updateData = carousel.dataGroups[carousel.dataGroupsCursor];
+        // 用于回调
+        var _dataGroupCursor = carousel.dataGroupsCursor * columns;
         // 再显示数据
+        var index = 0;
         for (var i = 0, l = columns; i < l; i++) {
-            imgs[rowIndex * columns + i].src = updateData[i].src;
+            index = rowIndex * columns + i;
+            imgs[index].src = updateData[i].src;
+            if(carousel.onRollUpdate) carousel.onRollUpdate(imgs[index], _dataGroupCursor + i, rowIndex, isNext);
         }
 
     };
@@ -991,7 +1012,8 @@ $g.createPageRoller = function(rowSet, imgSet, state, data, jsAnimationFPS) {
             for (i = 0; i < columns; i++) {
                 imgSet[i].src = data[i + startIndex].src;
                 // 回调
-                if (pager.onRollInit) pager.onRollIni(imgSet[i], i+startIndex, 0);
+
+                if (pager.onRollInit) pager.onRollInit(imgSet[i], i+startIndex, 0);
             }
         }
 
