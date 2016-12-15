@@ -93,6 +93,13 @@ $g.createRollerAnimation = function(rowSet, rowState, time) {
 
     roller.childSet = null;
 
+    // - Chenzhe - 2016-12-15 16:43:03
+    // 为了可以循环过渡动画
+    roller._recycle = false;
+    roller.toggleRecyle = function(flag){
+        if(flag !== undefined) this._recycle = flag;
+        else this._recycle = !this._recycle;
+    }
     // 用于debug
     roller.DEBUG = false;
 
@@ -427,9 +434,14 @@ $g.createRollerAnimation = function(rowSet, rowState, time) {
         if (this.onRollStart) this.onRollStart(this, isNext);
         // 动画结束后才能执行结束回调
         var that = this;
-        setTimeout(function() {
+
+        if(!this._recycle) {
+            setTimeout(function() {
+                that._rollEnd(isNext);
+            }, this.defaultTime * 1000);
+        } else {
             that._rollEnd(isNext);
-        }, this.defaultTime * 1000);
+        }
 
     };
     roller.rollNext = function() {
@@ -509,29 +521,35 @@ $g.createRollerAnimation = function(rowSet, rowState, time) {
     roller._rollEnd = function(isNext) {
         this._log('roll end handle');
         // 清除动画
-        this._cancelTransitionAll();
-
+        // carousel有时数据量小，无需数据并且要备用状态切换都要过渡
+        if(!this._recycle) this._cancelTransitionAll();
         // 备用item的样式这里更新，关键是关闭了transition后更新
         this._updateSpareStyle();
-
-        // 刷新变换了位置的行的数据
-        if (this.onRollEndUpdateData) {
-            var rowShouldBeUpdated = this._targetShouldBeUpdate.targetRowIndex;
-
-            this.onRollEndUpdateData(rowShouldBeUpdated, isNext);
-        } else {
-            throw new Error('roller\'s onRollEndUpdateData is undefined');
-        }
 
         // 可能是底层问题导致，动画渲染的时间线与理想的不一致，这里应该还有更好的处理方法
         // 目的就是为了确保结束处理 完成后 才能够进行开下一次的roll
         var that = this;
         setTimeout(function() {
+            // 最终一定关闭了动画
+            if(that._recycle) that._cancelTransitionAll();
+
+            // 数据量太少就不用刷数据了，针对carousel
+            if(!that._recycle) {
+                // 刷新变换了位置的行的数据
+                if (that.onRollEndUpdateData) {
+                    var rowShouldBeUpdated = that._targetShouldBeUpdate.targetRowIndex;
+
+                    that.onRollEndUpdateData(rowShouldBeUpdated, isNext);
+                } else {
+                    throw new Error('roller\'s onRollEndUpdateData is undefined');
+                }
+            }
+
             that.isRolling = false; // 所有结束处理完成后才是真正的roll完
             that._log('onRollEnd');
             if (that.onRollEnd) that.onRollEnd(that, isNext);
 
-        }, 50);
+        }, this._recycle ? this.defaultTime * 1000 : 0);
 
     };
 
@@ -665,8 +683,14 @@ $g.createCarousel = function(rows, imgs, state, data) {
     if (rows.length > Math.ceil(data.length / columns)) {
         throw new Error('数据太少，rows太多，不能创建carousel');
     }
-
+    // 创建roller, 用于后面的包装加工
     var roller = $g.createRollerAnimation(rows, state);
+
+    if( rows.length === data.length/columns) {
+        // 数据量与Rows数量相同时，开启循环模式(全过渡，不刷数据)
+        console.log('open recycle')
+        roller.toggleRecyle(true);
+    }
 
     // 将imgs分入rows
     var imgsGroup = (function() {
@@ -772,6 +796,7 @@ $g.createCarousel = function(rows, imgs, state, data) {
         var _dataGroupCursor = carousel.dataGroupsCursor * columns;
         // 再显示数据
         var index = 0;
+        if(rowIndex === undefined) return;
         for (var i = 0, l = columns; i < l; i++) {
             index = rowIndex * columns + i;
             imgs[index].src = updateData[i].src;
