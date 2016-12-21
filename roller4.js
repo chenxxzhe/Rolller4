@@ -1,29 +1,32 @@
+// TODO: createPageRoller 数据量过少的情况
+
+
 /**
  * 检查浏览器是否支持transform
  */
-$g.browserSupport = (function supportCheck() {
-    var data = {
-        prefix            : '',
-        supportTransform  : false,
-        supportTransform3d: false
-    };
-    data.supportTransform3d = ('WebKitCSSMatrix' in window && 'm11' in new WebKitCSSMatrix());
-    var testElem = document.createElement('div'),
-        style = testElem.style,
-        prefix = ['webkit', 'Moz'];
-    if (style.transform !== undefined) {
-        data.supportTransform = true;
-    } else {
-        for (var i = 0, l = prefix.length; i < l; i++) {
-            if (style[prefix[i] + 'Transform'] !== undefined) {
-                data.supportTransform = true;
-                data.prefix = prefix[i];
-                break;
-            }
-        }
-    }
-    return data;
-}());
+// $g.browserSupport = (function supportCheck() {
+//     var data = {
+//         prefix            : '',
+//         supportTransform  : false,
+//         supportTransform3d: false
+//     };
+//     data.supportTransform3d = ('WebKitCSSMatrix' in window && 'm11' in new WebKitCSSMatrix());
+//     var testElem = document.createElement('div'),
+//         style = testElem.style,
+//         prefix = ['webkit', 'Moz'];
+//     if (style.transform !== undefined) {
+//         data.supportTransform = true;
+//     } else {
+//         for (var i = 0, l = prefix.length; i < l; i++) {
+//             if (style[prefix[i] + 'Transform'] !== undefined) {
+//                 data.supportTransform = true;
+//                 data.prefix = prefix[i];
+//                 break;
+//             }
+//         }
+//     }
+//     return data;
+// }());
 
 
 /**
@@ -93,13 +96,17 @@ $g.createRollerAnimation = function(rowSet, rowState, time) {
 
     roller.childSet = null;
 
+    // 如果不支持transition就会使用js动画来代替
+    roller._supportTransition = $g.supportCSS('transition');
+    roller._jsAnim = [];
+
     // - Chenzhe - 2016-12-15 16:43:03
     // 为了可以循环过渡动画
     roller._recycle = false;
-    roller.toggleRecyle = function(flag){
-        if(flag !== undefined) this._recycle = flag;
+    roller.toggleRecyle = function(flag) {
+        if (flag !== undefined) this._recycle = flag;
         else this._recycle = !this._recycle;
-    }
+    };
     // 用于debug
     roller.DEBUG = false;
 
@@ -120,8 +127,8 @@ $g.createRollerAnimation = function(rowSet, rowState, time) {
 
     // 添加transition样式，相当于开启动画
     // XXX: 有多个元素transition时使用all会卡
-
     roller._setTransition = function(elem) {
+        if (!roller._supportTransition) return;
         if (this.transitionStyle) {
             elem.style.transition = this.transitionStyle;
             elem.style.webkitTransition = this.transitionStyle;
@@ -150,9 +157,18 @@ $g.createRollerAnimation = function(rowSet, rowState, time) {
     };
     // 清除transition样式，相当于关闭动画
     roller._cancelTransition = function(elem) {
-        elem.style.transition = '';
-        elem.style.webkitTransition = '';
-        elem.style.MozTransition = '';
+        if(roller._supportTransition) {
+            elem.style.transition = '';
+            elem.style.webkitTransition = '';
+            elem.style.MozTransition = '';
+        } else {
+            if(roller._jsAnim.length) {
+                for(var i=0, item; item=roller._jsAnim[i++];) {
+                    item.finish();
+                }
+                roller._jsAnim.length = 0;
+            }
+        }
     };
     // 清除所有元素(row & childSet)的transition
     roller._cancelTransitionAll = function() {
@@ -179,16 +195,28 @@ $g.createRollerAnimation = function(rowSet, rowState, time) {
         if (isNaN(elem.currentState)) {
             throw new Error('Element currentState is NaN');
         }
-        var styleText = '';
-        for (var p in state) {
-            if (styleNeedToAddPX.indexOf(p) !== -1) {
-                styleText = state[p][elem.currentState] + 'px';
-            } else {
-                styleText = state[p][elem.currentState];
-            }
-            elem.style[p] = styleText;
 
+        if (roller._supportTransition) {
+            var styleText = '';
+            for (var p in state) {
+                if (styleNeedToAddPX.indexOf(p) !== -1) {
+                    styleText = state[p][elem.currentState] + 'px';
+                } else {
+                    styleText = state[p][elem.currentState];
+                }
+                elem.style[p] = styleText;
+
+            }
+        } else {
+            // js 动画, 仅支持使用纯数字的属性
+            var from = {}, to = {};
+            for (var prop in state) {
+                from[prop] = state[prop][elem.lastState];
+                to[prop] = state[prop][elem.currentState];
+            }
+            roller._jsAnim.push($g._tween(elem, from, to, roller.defaultTime * 1000).start());
         }
+
     };
 
     /**
@@ -282,33 +310,17 @@ $g.createRollerAnimation = function(rowSet, rowState, time) {
     roller._handleRollNext = function() {
         var rowOrder = this.rowOrder;
         var rowIndex, startStateIndex, endStateIndex;
-        if (this.customAnimation) {
-            // 自定义动画
-            for (var i = 0, len = rowOrder.length; i < len; i++) {
-                rowIndex = rowOrder[i];
-                rowSet[rowIndex].currentState -= 1;
-                startStateIndex = rowSet[rowIndex].currentState + 1;
-                endStateIndex = startStateIndex - 1;
-                if (rowSet[rowIndex].currentState > -1) {
-                    this.customAnimation(rowSet[rowIndex], startStateIndex, endStateIndex, rowState, this.defaultTime);
-                }
-            }
-        } else {
-            // 默认transition动画
+        // 开启动画，一定要确保动画只能在rollNext与rollPrev之内是开启的。
+        this._setTransitionAll();
 
-            // 开启动画，一定要确保动画只能在rollNext与rollPrev之内是开启的。
-            this._setTransitionAll();
-
-            // 全部换状态，刷样式
-            for (var i = 0, len = rowOrder.length; i < len; i++) {
-                rowIndex = rowOrder[i];
-                // 准备行变为待转换状态，留待rollEnd时刷样式与数据
-                rowSet[rowIndex].currentState -= 1;
-                if (rowSet[rowIndex].currentState > -1) {
-                    this._updateStyles(rowSet[rowIndex], rowState);
-
-
-                }
+        // 全部换状态，刷样式
+        for (var i = 0, len = rowOrder.length; i < len; i++) {
+            rowIndex = rowOrder[i];
+            // 准备行变为待转换状态，留待rollEnd时刷样式与数据
+            rowSet[rowIndex].lastState = rowSet[rowIndex].currentState;
+            rowSet[rowIndex].currentState -= 1;
+            if (rowSet[rowIndex].currentState > -1) {
+                this._updateStyles(rowSet[rowIndex], rowState);
             }
         }
 
@@ -316,27 +328,15 @@ $g.createRollerAnimation = function(rowSet, rowState, time) {
         if (this.childSet) {
             var child;
             var flatChildSet = this._flatArray(this.childSet);
+            // childSet状态改变
+            this._setChildTransitionAll();
+            for (var i = flatChildSet.length; i--;) {
+                child = flatChildSet[i];
+                child.lastState = child.currentState;
+                child.currentState -= 1;
+                if (child.currentState > -1) {
+                    this._updateStyles(child, child.state);
 
-            if (this.customChildAnimation) {
-                // 自定义动画
-                for (var i = flatChildSet.length; i--;) {
-                    child = flatChildSet[i];
-                    child.currentState -= 1;
-                    if (child.currentState > -1) {
-                        this.customChildAnimation(child, child.currentState + 1, child.currentState, child.state, this.defaultTime);
-
-                    }
-                }
-            } else {
-                // 默认动画
-                this._setChildTransitionAll();
-                for (var i = flatChildSet.length; i--;) {
-                    child = flatChildSet[i];
-                    child.currentState -= 1;
-                    if (child.currentState > -1) {
-                        this._updateStyles(child, child.state);
-
-                    }
                 }
             }
         }
@@ -353,27 +353,16 @@ $g.createRollerAnimation = function(rowSet, rowState, time) {
 
         // row 的动画
         var rowIndex, startStateIndex, endStateIndex;
-        if (this.customAnimation) {
-            // 自定义动画
-            for (var i = 0, len = rowOrder.length; i < len; i++) {
-                rowIndex = rowOrder[i];
-                rowSet[rowIndex].currentState += 1;
-                startStateIndex = rowSet[rowIndex].currentState - 1;
-                endStateIndex = startStateIndex + 1;
-                if (rowSet[rowIndex].currentState < totalState) {
-                    this.customAnimation(rowSet[rowIndex], startStateIndex, endStateIndex, rowState, this.defaultTime);
-                }
-            }
-        } else {
-            // 默认动画，原理是改变状态标记，然后根据标记来改样式
-            this._setTransitionAll();
-            for (var i = 0, len = rowOrder.length; i < len; i++) {
-                rowIndex = rowOrder[i];
-                rowSet[rowIndex].currentState += 1;
-                if (rowSet[rowIndex].currentState < totalState) {
-                    this._updateStyles(rowSet[rowIndex], rowState);
 
-                }
+        // 处理row的状态
+        this._setTransitionAll();
+        for (var i = 0, len = rowOrder.length; i < len; i++) {
+            rowIndex = rowOrder[i];
+            rowSet[rowIndex].lastState = rowSet[rowIndex].currentState;
+            rowSet[rowIndex].currentState += 1;
+            if (rowSet[rowIndex].currentState < totalState) {
+                this._updateStyles(rowSet[rowIndex], rowState);
+
             }
         }
 
@@ -381,27 +370,14 @@ $g.createRollerAnimation = function(rowSet, rowState, time) {
         if (this.childSet) {
             var child;
             var flatChildSet = this._flatArray(this.childSet);
-
-            if (this.customChildAnimation) {
-                // 自定义动画
-                for (var i = flatChildSet.length; i--;) {
-                    child = flatChildSet[i];
-                    child.currentState += 1;
-                    if (child.currentState < child.totalState) {
-                        this.customChildAnimation(child, child.currentState - 1, child.currentState, child.state, this.defaultTime);
-
-                    }
-                }
-            } else {
-                // 默认动画
-                this._setChildTransitionAll();
-                for (var i = flatChildSet.length; i--;) {
-                    child = flatChildSet[i];
-                    child.currentState += 1;
-                    if (child.currentState < child.totalState) {
-                        this._updateStyles(child, child.state);
-
-                    }
+            // 改变状态
+            this._setChildTransitionAll();
+            for (var i = flatChildSet.length; i--;) {
+                child = flatChildSet[i];
+                child.lastState = child.currentState;
+                child.currentState += 1;
+                if (child.currentState < child.totalState) {
+                    this._updateStyles(child, child.state);
                 }
             }
         }
@@ -435,7 +411,7 @@ $g.createRollerAnimation = function(rowSet, rowState, time) {
         // 动画结束后才能执行结束回调
         var that = this;
 
-        if(!this._recycle) {
+        if (!this._recycle) {
             setTimeout(function() {
                 that._rollEnd(isNext);
             }, this.defaultTime * 1000);
@@ -461,6 +437,7 @@ $g.createRollerAnimation = function(rowSet, rowState, time) {
 
         for (var i = len; i--;) {
             targetRow = rowSet[i]; // current row
+            targetRow.lastState = targetRow.currentState;
             // 遍历rowset，找出待转换行
             if (targetRow.currentState <= -1) {
                 // roll next
@@ -489,9 +466,9 @@ $g.createRollerAnimation = function(rowSet, rowState, time) {
             var targetChild, totalState;
             var flatChildSet = this._flatArray(this.childSet);
             // 找出待转换状态的childSet
-
             for (var i = flatChildSet.length; i--;) {
                 targetChild = flatChildSet[i];
+                targetChild.lastState = targetChild.currentState;
                 totalState = targetChild.totalState;
                 if (targetChild.currentState <= -1) {
                     targetChild.currentState = totalState - 1;
@@ -522,7 +499,7 @@ $g.createRollerAnimation = function(rowSet, rowState, time) {
         this._log('roll end handle');
         // 清除动画
         // carousel有时数据量小，无需数据并且要备用状态切换都要过渡
-        if(!this._recycle) this._cancelTransitionAll();
+        if (!this._recycle) this._cancelTransitionAll();
         // 备用item的样式这里更新，关键是关闭了transition后更新
         this._updateSpareStyle();
 
@@ -531,10 +508,10 @@ $g.createRollerAnimation = function(rowSet, rowState, time) {
         var that = this;
         setTimeout(function() {
             // 最终一定关闭了动画
-            if(that._recycle) that._cancelTransitionAll();
+            if (that._recycle) that._cancelTransitionAll();
 
             // 数据量太少就不用刷数据了，针对carousel
-            if(!that._recycle) {
+            if (!that._recycle) {
                 // 刷新变换了位置的行的数据
                 if (that.onRollEndUpdateData) {
                     var rowShouldBeUpdated = that._targetShouldBeUpdate.targetRowIndex;
@@ -774,19 +751,19 @@ $g.createCarousel = function(rows, imgs, state, data) {
 
                     if (c === columns - 1) count += 1;
                 }
-                if(carousel.onRollInit) carousel.onRollInit(imgs[colIndex], _dataCursor, _rowIndex);
+                if (carousel.onRollInit) carousel.onRollInit(imgs[colIndex], _dataCursor, _rowIndex);
             }
         }
         // 再刷第一行
-        if(count === 0 ) count = startCursor === 0 ? dataGroups.length - 1 : startCursor - 1
+        if (count === 0) count = startCursor === 0 ? dataGroups.length - 1 : startCursor - 1;
         for (var i = 0, l = columns; i < l; i++) {
             imgs[i].src = dataGroups[count][i].src;
-            if(carousel.onRollInit) carousel.onRollInit(imgs[i], count * columns + i, count);
+            if (carousel.onRollInit) carousel.onRollInit(imgs[i], count * columns + i, count);
         }
     };
     roller.onRollReady = function(roller) {
-        if(carousel.onRollReady) carousel.onRollReady(carousel);
-    }
+        if (carousel.onRollReady) carousel.onRollReady(carousel);
+    };
     roller.onRollStart = function(roller, isNext) {
         if (carousel.onRollStart) carousel.onRollStart(carousel, isNext);
     };
@@ -795,7 +772,7 @@ $g.createCarousel = function(rows, imgs, state, data) {
     };
 
     roller.onRollEndUpdateData = function(rowIndex, isNext) {
-        if(carousel._noUpdate) return;
+        if (carousel._noUpdate) return;
 
         this._log('onRollEndUpdateData');
 
@@ -804,15 +781,15 @@ $g.createCarousel = function(rows, imgs, state, data) {
         var updateData = null,
             total = dataGroups.length,
             _groupIndex = 0;
-        if(isNext) {
-            _groupIndex = carousel.dataGroupsCursor + rows.length - 2
-            if(_groupIndex >= total) {
+        if (isNext) {
+            _groupIndex = carousel.dataGroupsCursor + rows.length - 2;
+            if (_groupIndex >= total) {
                 _groupIndex -= total;
             }
             updateData = carousel.dataGroups[_groupIndex];
         } else {
             _groupIndex = carousel.dataGroupsCursor - 1;
-            if(_groupIndex < 0) _groupIndex = total - 1;
+            if (_groupIndex < 0) _groupIndex = total - 1;
         }
         updateData = carousel.dataGroups[_groupIndex];
 
@@ -820,12 +797,12 @@ $g.createCarousel = function(rows, imgs, state, data) {
         var _dataCursor = _groupIndex * columns;
         // 再显示数据
         var index = 0;
-        if(rowIndex === undefined) return;
+        if (rowIndex === undefined) return;
         for (var i = 0, l = columns; i < l; i++) {
             index = rowIndex * columns + i;
             imgs[index].src = updateData[i].src;
 
-            if(carousel.onRollUpdate) carousel.onRollUpdate(imgs[index], _dataCursor + i, rowIndex, isNext);
+            if (carousel.onRollUpdate) carousel.onRollUpdate(imgs[index], _dataCursor + i, rowIndex, isNext);
         }
 
     };
@@ -961,16 +938,16 @@ $g.createCarousel = function(rows, imgs, state, data) {
     };
     carousel.isRolling = function() {
         return roller.isRolling;
-    }
+    };
 
     carousel.toggleRecyle = function(flag) {
         roller.toggleRecyle(flag);
-    }
+    };
 
-    carousel.toggleUpdate = function(flag){
-        if(flag != undefined) this._noUpdate = !flag;
+    carousel.toggleUpdate = function(flag) {
+        if (flag != undefined) this._noUpdate = !flag;
         else this._noUpdate = !this._noUpdate;
-    }
+    };
 
     carousel.debug = function() {
         roller.DEBUG = true;
@@ -991,7 +968,7 @@ $g.createCarousel = function(rows, imgs, state, data) {
  * @param  {Number} jsAnimationFPS 如果设定了就使用js动画，但仅支持left top
  * 另外可以给实例挂上onRollReady, onRollStart, onRollEnd
  */
-$g.createPageRoller = function(rowSet, imgSet, state, data, jsAnimationFPS) {
+$g.createPageRoller = function(rowSet, imgSet, state, data) {
 
     var roller = $g.createRollerAnimation(rowSet, state);
     // roller.DEBUG = true;
@@ -1008,7 +985,8 @@ $g.createPageRoller = function(rowSet, imgSet, state, data, jsAnimationFPS) {
     // 首页从0开始，本质是当前最左面数据的Index
     pager.currentPage = 0;
     // totalPage表示要多少Row才能读完数据
-    pager.totalPage = Math.floor(data.length / columns);
+    // current与total的关系就像数组的index与total
+    pager.totalPage = Math.ceil(data.length / columns);
     // onInitData刷数据时的回调，每一个元素回调一次
     // 回调自带参数: img, dataIndex(不一定存在),rowIndex
     pager.onRollInit = null;
@@ -1072,7 +1050,7 @@ $g.createPageRoller = function(rowSet, imgSet, state, data, jsAnimationFPS) {
                 imgSet[i].src = data[i + startIndex].src;
                 // 回调
 
-                if (pager.onRollInit) pager.onRollInit(imgSet[i], i+startIndex, 0);
+                if (pager.onRollInit) pager.onRollInit(imgSet[i], i + startIndex, 0);
             }
         }
 
@@ -1117,14 +1095,14 @@ $g.createPageRoller = function(rowSet, imgSet, state, data, jsAnimationFPS) {
                     _indexForCallbck = null;
                 }
                 // 更新每一个元素都有回调
-                if(pager.onRollUpdate) pager.onRollUpdate(imgSet[imgIndex+i], _indexForCallbck, rowIndex, isNext);
+                if (pager.onRollUpdate) pager.onRollUpdate(imgSet[imgIndex + i], _indexForCallbck, rowIndex, isNext);
 
             }
         }
     };
     roller.onRollReady = function(roller) {
-        if(pager.onRollReady) pager.onRollReady(pager);
-    }
+        if (pager.onRollReady) pager.onRollReady(pager);
+    };
     roller.onRollStart = function(roller, isNext) {
         if (pager.onRollStart) pager.onRollStart(pager, isNext);
     };
@@ -1202,9 +1180,11 @@ $g.createPageRoller = function(rowSet, imgSet, state, data, jsAnimationFPS) {
                 dataCursor++;
 
                 // cb
-                if(pager.onRollUpdate) pager.onRollUpdate(imgSet[j+imgIndex], _cbCusor, rowIndex);
+                if (pager.onRollUpdate) pager.onRollUpdate(imgSet[j + imgIndex], _cbCusor, rowIndex);
             }
         }
+        if(pager.onRollStart) pager.onRollStart(pager);
+        if(pager.onRollEnd) pager.onRollEnd(pager);
         return this;
     };
 
@@ -1287,63 +1267,6 @@ $g.createPageRoller = function(rowSet, imgSet, state, data, jsAnimationFPS) {
         return roller.isRolling;
     };
 
-    /**
-     * 替代transition的js动画，仅仅支持left,top过渡
-     * @param   {Number}    fps         每秒多少帧
-     * @return  {Function}  jsAnimation 用于替代transition的js动画函数
-     */
-    pager.jsMoveAnimation = function(fps) {
-        return function(target, startStateIndex, endStateIndex, state, duration) {
-            fps = fps || 30;
-            // 默认30的fps
-            var px = 'px';
-            duration *= 1000;
-            if (!state.left && !state.top) {
-                throw new Error('state must have left or top');
-            }
-            var startX = 0,
-                endX = 0,
-                startY = 0,
-                endY = 0,
-                diffX = 0,
-                diffY = 0,
-                stepX = 0,
-                stepY = 0;
-            if (state.left) {
-                startX = state.left[startStateIndex];
-                endX = state.left[endStateIndex];
-                diffX = endX - startX;
-                stepX = diffX / (duration * fps / 1000);
-            }
-            if (state.top) {
-                startY = state.top[startStateIndex];
-                endY = state.top[endStateIndex];
-                diffY = endX - startY;
-                stepY = diffY / (duration * fps / 1000);
-
-            }
-            var style = target.style,
-                count = 0,
-                interval = 1000 / fps,
-                times = 1;
-            var move = function() {
-                if (state.left) style.left = startX + stepX * times + px;
-                if (state.top) style.top = startY + stepY * times + px;
-                if (count < duration) {
-                    count += interval;
-                    times += 1;
-                    setTimeout(move, interval);
-                } else {
-                    if (state.left) style.left = endX + px;
-                    if (state.top) style.top = endY + px;
-                }
-            };
-            move();
-        };
-    };
-    if (jsAnimationFPS) {
-        roller.customAnimation = pager.jsMoveAnimation(jsAnimationFPS);
-    }
 
     return pager;
 };
@@ -1369,3 +1292,173 @@ $g.stringFormat = function(str, context) {
     return result;
 
 };
+/**
+ * supportCSS 检查是否支持某一属性
+ * @param {String} 不带前缀的style属性名
+ * @return
+ */
+$g.supportCSS = function(style) {
+    // 原理是支持的属性会出现在computedStyle中
+    var div, computedSytle;
+    var prefix = ['', 'webkit', 'Moz', 'ms'],
+        len = prefix.length,
+        flag = false,
+        i = 0;
+    try { // 怕getComputedStyle出错
+        div = document.createElement('div');
+        computedSytle = getComputedStyle(div, null);
+
+        for (;i < len && !flag; i++) {
+            var pre = prefix[i],
+                capitalStyle = i === 0 ? style : style[0].toUpperCase() + style.substring(1),
+                checkedStyle = pre + capitalStyle;
+            if (checkedStyle in computedSytle) flag = true;
+        }
+        return flag;
+    } catch (e) {
+        return false;
+    } finally {
+        // clean
+        div = null;
+        computedSytle = null;
+    }
+};
+
+// 一个简单的动画方法，很多功能没完善，现阶段用于不支持transition时的代替
+// 只支持属性值是数字的属性，例如left,top; 以后可能会支持transform
+$g._tween = function(el, from, to, duration) {
+    var fps = 30,
+        // 间隔
+        interval = Math.floor(1000 / fps),
+        // 执行次数
+        totalCount = Math.floor(fps / 1000 * duration);
+
+    if (!from || !to) throw new Error('Expected "from" and "to"');
+    if (!duration) duration = 500;
+
+    var diff = {};
+    (function() {
+        for (var prop in from) {
+            diff[prop] = to[prop] - from[prop];
+        }
+    }());
+
+    function _toFinalStyle() {
+        for (var prop in to) {
+            el.style[prop] = to[prop];
+        }
+    }
+
+    var timer = null;
+    // 基于时间的方法会显得突变
+    function move(startTime) {
+        var prop, elapsed = new Date() - startTime;
+        if (elapsed >= duration) {
+            _toFinalStyle();
+            timer = null;
+            return;
+        }
+        for (prop in diff) {
+            el.style[prop] = diff[prop] * elapsed / duration + from[prop];
+        }
+
+        timer = setTimeout(function() {
+            move(startTime);
+        }, interval);
+    }
+
+    // 基于次数的方法
+    function step(count, total) {
+        var prop;
+        if (count > total) {
+            _toFinalStyle();
+            timer = null;
+            return;
+        }
+        for (prop in diff) {
+            el.style[prop] = diff[prop] * count / total + from[prop];
+        }
+        timer = setTimeout(function() {
+            step(count+1, total);
+        }, interval);
+    }
+
+
+    return {
+        start: function() {
+            // move(new Date().getTime());
+            step(1, totalCount);
+            return this;
+        },
+        stop: function() {
+            if (timer) {
+                clearTimeout(timer);
+                timer = null;
+            }
+            return this;
+        },
+        // 立刻完成，用于开始下一次动画
+        finish: function() {
+            console.log('finish')
+            this.stop();
+            _toFinalStyle();
+            return this;
+
+        }
+    };
+};
+
+/**
+ * 替代transition的js动画，仅仅支持left,top过渡
+ * @param   {Number}    fps         每秒多少帧
+ * @return  {Function}  jsAnimation 用于替代transition的js动画函数
+ */
+// $g.jsMoveAnimation = function(fps) {
+//     return function(target, startStateIndex, endStateIndex, state, duration) {
+//         fps = fps || 30;
+//         // 默认30的fps
+//         var px = 'px';
+//         duration *= 1000;
+//         if (!state.left && !state.top) {
+//             throw new Error('state must have left or top');
+//         }
+//         var startX = 0,
+//             endX = 0,
+//             startY = 0,
+//             endY = 0,
+//             diffX = 0,
+//             diffY = 0,
+//             stepX = 0,
+//             stepY = 0;
+//         if (state.left) {
+//             startX = state.left[startStateIndex];
+//             endX = state.left[endStateIndex];
+//             diffX = endX - startX;
+//             stepX = diffX / (duration * fps / 1000);
+//         }
+//         if (state.top) {
+//             startY = state.top[startStateIndex];
+//             endY = state.top[endStateIndex];
+//             diffY = endX - startY;
+//             stepY = diffY / (duration * fps / 1000);
+
+//         }
+//         var style = target.style,
+//             count = 0,
+//             interval = 1000 / fps,
+//             times = 1;
+//         var move = function() {
+//             if (state.left) style.left = startX + stepX * times + px;
+//             if (state.top) style.top = startY + stepY * times + px;
+//             if (count < duration) {
+//                 count += interval;
+//                 times += 1;
+//                 setTimeout(move, interval);
+//             } else {
+//                 if (state.left) style.left = endX + px;
+//                 if (state.top) style.top = endY + px;
+//             }
+//         };
+//         move();
+//     };
+// };
