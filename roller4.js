@@ -655,7 +655,7 @@ $g.createRowElements = function(config) {
 $g.createCarousel = function(rows, imgs, state, data) {
     // 一行有几列
     var columns = Math.ceil(imgs.length / rows.length),
-        EMPTY = 'data:image/png,f';
+        EMPTY = 'data:image/gif;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQImWNgYGBgAAAABQABh6FO1AAAAABJRU5ErkJggg==';
 
     if (rows.length > Math.ceil(data.length / columns)) {
         throw new Error('数据太少，rows太多，不能创建carousel');
@@ -978,7 +978,7 @@ $g.createPageRoller = function(rowSet, imgSet, state, data) {
         data  : data
     };
     var isInitiated = false,
-        EMPTY = 'data:image/png,f',
+        EMPTY = 'data:image/gif;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQImWNgYGBgAAAABQABh6FO1AAAAABJRU5ErkJggg==',
         // showRows = rowSet.length - 1,
         columns = imgSet.length / rowSet.length;
 
@@ -989,7 +989,7 @@ $g.createPageRoller = function(rowSet, imgSet, state, data) {
     pager.totalPage = Math.ceil(data.length / columns);
     // onInitData刷数据时的回调，每一个元素回调一次
     // 回调自带参数: img, dataIndex(不一定存在),rowIndex
-    pager.onRollInit = null;
+    pager.onRollInit = null; // XXX: 这个回调是否可以合并进onRollUpdate
     // 滚动刷数据时的回调，该封装已经自动完成了刷图部分
     // 回调自带参数: img, dataIndex(不一定存在),rowIndex,isNext
     pager.onRollUpdate = null;
@@ -1399,7 +1399,6 @@ $g._tween = function(el, from, to, duration) {
         },
         // 立刻完成，用于开始下一次动画
         finish: function() {
-            console.log('finish')
             this.stop();
             _toFinalStyle();
             return this;
@@ -1407,58 +1406,3 @@ $g._tween = function(el, from, to, duration) {
         }
     };
 };
-
-/**
- * 替代transition的js动画，仅仅支持left,top过渡
- * @param   {Number}    fps         每秒多少帧
- * @return  {Function}  jsAnimation 用于替代transition的js动画函数
- */
-// $g.jsMoveAnimation = function(fps) {
-//     return function(target, startStateIndex, endStateIndex, state, duration) {
-//         fps = fps || 30;
-//         // 默认30的fps
-//         var px = 'px';
-//         duration *= 1000;
-//         if (!state.left && !state.top) {
-//             throw new Error('state must have left or top');
-//         }
-//         var startX = 0,
-//             endX = 0,
-//             startY = 0,
-//             endY = 0,
-//             diffX = 0,
-//             diffY = 0,
-//             stepX = 0,
-//             stepY = 0;
-//         if (state.left) {
-//             startX = state.left[startStateIndex];
-//             endX = state.left[endStateIndex];
-//             diffX = endX - startX;
-//             stepX = diffX / (duration * fps / 1000);
-//         }
-//         if (state.top) {
-//             startY = state.top[startStateIndex];
-//             endY = state.top[endStateIndex];
-//             diffY = endX - startY;
-//             stepY = diffY / (duration * fps / 1000);
-
-//         }
-//         var style = target.style,
-//             count = 0,
-//             interval = 1000 / fps,
-//             times = 1;
-//         var move = function() {
-//             if (state.left) style.left = startX + stepX * times + px;
-//             if (state.top) style.top = startY + stepY * times + px;
-//             if (count < duration) {
-//                 count += interval;
-//                 times += 1;
-//                 setTimeout(move, interval);
-//             } else {
-//                 if (state.left) style.left = endX + px;
-//                 if (state.top) style.top = endY + px;
-//             }
-//         };
-//         move();
-//     };
-// };
