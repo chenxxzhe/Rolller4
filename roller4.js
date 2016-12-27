@@ -64,6 +64,8 @@ $g.createRollerAnimation = function(rowSet, rowState, time) {
     roller.defaultTime = 0.3;
     roller.rowTotalState = 0;
 
+    roller.EMPTY = 'data:image/gif;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQImWNgYGBgAAAABQABh6FO1AAAAABJRU5ErkJggg==';
+
     (function() {
         var i = null, len = null;
         for (i = 0, len = rowSet.length; i < len; i++) {
@@ -654,15 +656,13 @@ $g.createRowElements = function(config) {
 
 $g.createCarousel = function(rows, imgs, state, data) {
     // 一行有几列
-    var columns = Math.ceil(imgs.length / rows.length),
-        EMPTY = 'data:image/gif;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQImWNgYGBgAAAABQABh6FO1AAAAABJRU5ErkJggg==';
-
+    var columns = Math.ceil(imgs.length / rows.length);
     if (rows.length > Math.ceil(data.length / columns)) {
         throw new Error('数据太少，rows太多，不能创建carousel');
     }
     // 创建roller, 用于后面的包装加工
     var roller = $g.createRollerAnimation(rows, state);
-
+    var EMPTY = roller.EMPTY;
     // if( rows.length === data.length/columns) {
     //     // 数据量与Rows数量相同时，开启循环模式(全过渡，不刷数据)
     //     console.log('open recycle')
@@ -719,7 +719,8 @@ $g.createCarousel = function(rows, imgs, state, data) {
         onRollEnd           : null,
         _isInitiated        : false,
         // 如果只有与Row数量一样多的数据，那么就可以不刷图了
-        _noUpdate           : false
+        _noUpdate           : false,
+        EMPTY               : EMPTY
     };
 
     roller.onInitData = function(roller) {
@@ -761,8 +762,8 @@ $g.createCarousel = function(rows, imgs, state, data) {
             if (carousel.onRollInit) carousel.onRollInit(imgs[i], count * columns + i, count);
         }
     };
-    roller.onRollReady = function(roller) {
-        if (carousel.onRollReady) carousel.onRollReady(carousel);
+    roller.onRollReady = function(roller, isNext) {
+        if (carousel.onRollReady) carousel.onRollReady(carousel, isNext);
     };
     roller.onRollStart = function(roller, isNext) {
         if (carousel.onRollStart) carousel.onRollStart(carousel, isNext);
@@ -978,7 +979,7 @@ $g.createPageRoller = function(rowSet, imgSet, state, data) {
         data  : data
     };
     var isInitiated = false,
-        EMPTY = 'data:image/gif;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQImWNgYGBgAAAABQABh6FO1AAAAABJRU5ErkJggg==',
+        EMPTY = roller.EMPTY,
         // showRows = rowSet.length - 1,
         columns = imgSet.length / rowSet.length;
 
@@ -1100,8 +1101,8 @@ $g.createPageRoller = function(rowSet, imgSet, state, data) {
             }
         }
     };
-    roller.onRollReady = function(roller) {
-        if (pager.onRollReady) pager.onRollReady(pager);
+    roller.onRollReady = function(roller, isNext) {
+        if (pager.onRollReady) pager.onRollReady(pager, isNext);
     };
     roller.onRollStart = function(roller, isNext) {
         if (pager.onRollStart) pager.onRollStart(pager, isNext);
@@ -1297,32 +1298,32 @@ $g.stringFormat = function(str, context) {
  * @param {String} 不带前缀的style属性名
  * @return
  */
-$g.supportCSS = function(style) {
-    // 原理是支持的属性会出现在computedStyle中
-    var div, computedSytle;
-    var prefix = ['', 'webkit', 'Moz', 'ms'],
-        len = prefix.length,
-        flag = false,
-        i = 0;
-    try { // 怕getComputedStyle出错
-        div = document.createElement('div');
-        computedSytle = getComputedStyle(div, null);
+// $g.supportCSS = function(style) {
+//     // 原理是支持的属性会出现在computedStyle中
+//     var div, computedSytle;
+//     var prefix = ['', 'webkit', 'Moz', 'ms'],
+//         len = prefix.length,
+//         flag = false,
+//         i = 0;
+//     try { // 怕getComputedStyle出错
+//         div = document.createElement('div');
+//         computedSytle = getComputedStyle(div, null);
 
-        for (;i < len && !flag; i++) {
-            var pre = prefix[i],
-                capitalStyle = i === 0 ? style : style[0].toUpperCase() + style.substring(1),
-                checkedStyle = pre + capitalStyle;
-            if (checkedStyle in computedSytle) flag = true;
-        }
-        return flag;
-    } catch (e) {
-        return false;
-    } finally {
-        // clean
-        div = null;
-        computedSytle = null;
-    }
-};
+//         for (;i < len && !flag; i++) {
+//             var pre = prefix[i],
+//                 capitalStyle = i === 0 ? style : style[0].toUpperCase() + style.substring(1),
+//                 checkedStyle = pre + capitalStyle;
+//             if (checkedStyle in computedSytle) flag = true;
+//         }
+//         return flag;
+//     } catch (e) {
+//         return false;
+//     } finally {
+//         // clean
+//         div = null;
+//         computedSytle = null;
+//     }
+// };
 
 // 一个简单的动画方法，很多功能没完善，现阶段用于不支持transition时的代替
 // 只支持属性值是数字的属性，例如left,top; 以后可能会支持transform
